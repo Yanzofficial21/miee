@@ -1,0 +1,98 @@
+name: Build Flutter/Android App
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_type:
+        description: 'Tipe project (flutter/android)'
+        required: true
+        type: string
+      user_id:
+        description: 'Telegram User ID'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download project file
+        run: |
+          echo "Mengunduh file project terbaru..."
+          curl -L -o project.zip "https://raw.githubusercontent.com/${{ github.repository }}/main/project_${{ github.event.inputs.user_id }}_*.zip"
+          ls -la
+
+      - name: Setup Flutter (if flutter project)
+        if: github.event.inputs.project_type == 'flutter'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Setup Java (for Android)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract project
+        run: |
+          mkdir project_source
+          unzip -q project.zip -d project_source
+          cd project_source
+          ls -la
+
+      - name: Build Flutter APK
+        if: github.event.inputs.project_type == 'flutter'
+        run: |
+          cd project_source
+          flutter clean
+          flutter pub get
+          flutter build apk --release
+          flutter build apk --debug
+
+      - name: Build Android APK
+        if: github.event.inputs.project_type == 'android'
+        run: |
+          cd project_source
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew assembleRelease
+            ./gradlew assembleDebug
+          else
+            echo "Gradle wrapper not found"
+          fi
+
+      - name: Upload Flutter Artifacts
+        if: github.event.inputs.project_type == 'flutter' && success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: flutter-apk
+          path: |
+            project_source/build/app/outputs/flutter-apk/*.apk
+
+      - name: Upload Android Artifacts
+        if: github.event.inputs.project_type == 'android' && success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-apk
+          path: |
+            project_source/app/build/outputs/apk/release/*.apk
+            project_source/app/build/outputs/apk/debug/*.apk
+            project_source/*/build/outputs/apk/**/*.apk
+
+      - name: Notify success
+        if: success()
+        run: |
+          echo "✅ Build berhasil untuk user ${{ github.event.inputs.user_id }}"
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "❌ Build gagal untuk user ${{ github.event.inputs.user_id }}"
